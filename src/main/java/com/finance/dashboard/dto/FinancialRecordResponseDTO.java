@@ -1,5 +1,6 @@
 package com.finance.dashboard.dto;
 
+import com.finance.dashboard.entity.Category;
 import com.finance.dashboard.entity.RecordType;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -19,7 +20,7 @@ public class FinancialRecordResponseDTO {
     private Long id;
     private BigDecimal amount;
     private RecordType type;
-    private String category;
+    private Category category;
     private LocalDate date;
     private String notes;
     private String createdBy;

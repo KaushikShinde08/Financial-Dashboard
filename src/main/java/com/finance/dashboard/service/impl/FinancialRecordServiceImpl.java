@@ -2,6 +2,7 @@ package com.finance.dashboard.service.impl;
 
 import com.finance.dashboard.dto.FinancialRecordRequestDTO;
 import com.finance.dashboard.dto.FinancialRecordResponseDTO;
+import com.finance.dashboard.entity.Category;
 import com.finance.dashboard.entity.FinancialRecord;
 import com.finance.dashboard.entity.RecordType;
 import com.finance.dashboard.entity.Status;
@@ -13,25 +14,41 @@ import com.finance.dashboard.repository.FinancialRecordRepository;
 import com.finance.dashboard.repository.UserRepository;
 import com.finance.dashboard.service.FinancialRecordService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 import java.time.LocalDate;
-import java.util.List;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class FinancialRecordServiceImpl implements FinancialRecordService {
 
+    private static final Set<Category> INCOME_CATEGORIES = Set.of(
+            Category.SALARY, Category.FREELANCE, Category.BUSINESS,
+            Category.INVESTMENT, Category.BONUS, Category.OTHER
+    );
+
+    private static final Set<Category> EXPENSE_CATEGORIES = Set.of(
+            Category.RENT, Category.FOOD, Category.UTILITIES, Category.TRANSPORT,
+            Category.SHOPPING, Category.HEALTH, Category.ENTERTAINMENT, Category.OTHER
+    );
+
     private final FinancialRecordRepository recordRepository;
     private final UserRepository userRepository;
     private final FinancialRecordMapper mapper;
 
+    @CacheEvict(value = {"dashboardSummary", "categorySummary", "monthlySummary"}, allEntries = true)
     @Override
     public FinancialRecordResponseDTO createRecord(FinancialRecordRequestDTO dto, String creatorEmail) {
         User user = userRepository.findByEmail(creatorEmail)
                 .filter(u -> u.getStatus() == Status.ACTIVE)
                 .orElseThrow(() -> new BadRequestException("User not found or is inactive"));
 
+        processCategory(dto);
         FinancialRecord record = mapper.toEntity(dto);
         record.setCreatedBy(user);
 
@@ -39,13 +56,12 @@ public class FinancialRecordServiceImpl implements FinancialRecordService {
     }
 
     @Override
-    public List<FinancialRecordResponseDTO> getAllRecords() {
-        return recordRepository.findAll()
-                .stream()
-                .map(mapper::toResponseDTO)
-                .toList();
+    public Page<FinancialRecordResponseDTO> getAllRecords(Pageable pageable) {
+        return recordRepository.findAll(pageable)
+                .map(mapper::toResponseDTO);
     }
 
+    @CacheEvict(value = {"dashboardSummary", "categorySummary", "monthlySummary"}, allEntries = true)
     @Override
     public void deleteRecord(Long id) {
         FinancialRecord record = recordRepository.findById(id)
@@ -56,19 +72,21 @@ public class FinancialRecordServiceImpl implements FinancialRecordService {
     }
 
     @Override
-    public List<FinancialRecordResponseDTO> getByType(RecordType type) {
-        return recordRepository.findByType(type)
-                .stream()
-                .map(mapper::toResponseDTO)
-                .toList();
+    public Page<FinancialRecordResponseDTO> getByType(RecordType type, Pageable pageable) {
+        return recordRepository.findByType(type, pageable)
+                .map(mapper::toResponseDTO);
     }
 
+    @CacheEvict(value = {"dashboardSummary", "categorySummary", "monthlySummary"}, allEntries = true)
     @Override
     public FinancialRecordResponseDTO updateRecord(Long id, FinancialRecordRequestDTO dto) {
-
         FinancialRecord record = recordRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Record not found with id: " + id));
+
+
+        validateCategory(dto.getType(), dto.getCategory());
+        
 
         mapper.updateEntityFromDto(dto, record);
 
@@ -78,23 +96,42 @@ public class FinancialRecordServiceImpl implements FinancialRecordService {
     }
 
     @Override
-    public List<FinancialRecordResponseDTO> filterRecords(
+    public Page<FinancialRecordResponseDTO> filterRecords(
             RecordType type,
-            String category,
+            Category category,
             LocalDate startDate,
-            LocalDate endDate) {
+            LocalDate endDate,
+            Pageable pageable) {
 
         validateDateRange(startDate, endDate);
 
         return recordRepository
-                .filterRecords(type, category, startDate, endDate)
-                .stream()
-                .map(mapper::toResponseDTO)
-                .toList();
+                .filterRecords(type, category, startDate, endDate, pageable)
+                .map(mapper::toResponseDTO);
     }
+
     private void validateDateRange(LocalDate start, LocalDate end) {
-        if (start != null && end != null && start.isAfter(end)) {
+        if (bothDatesProvided(start, end) && start.isAfter(end)) {
             throw new BadRequestException("Start date cannot be after end date");
         }
+    }
+
+    private boolean bothDatesProvided(LocalDate start, LocalDate end) {
+        return start != null && end != null;
+    }
+
+    private void processCategory(FinancialRecordRequestDTO dto) {
+        validateCategory(dto.getType(), dto.getCategory());
+    }
+
+    private void validateCategory(RecordType type, Category category) {
+        Set<Category> validCategories = getValidCategoriesForType(type);
+        if (!validCategories.contains(category)) {
+            throw new BadRequestException("Invalid category for " + type.name().toLowerCase() + " record: " + category);
+        }
+    }
+
+    private Set<Category> getValidCategoriesForType(RecordType type) {
+        return type == RecordType.INCOME ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
     }
 }

@@ -30,6 +30,7 @@ public class FinancialRecordMapper {
                 record.getCreatedAt()
         );
     }
+
     public void updateEntityFromDto(FinancialRecordRequestDTO dto, FinancialRecord record) {
         record.setAmount(dto.getAmount());
         record.setType(dto.getType());
